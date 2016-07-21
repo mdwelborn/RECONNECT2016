@@ -1,0 +1,47 @@
+Local Message &msgReq, &msgRsp;
+Local Document &docReq, &docRsp, &docUri;
+Local Compound &root;
+
+If PSOPRDEFN.OPRDEFNDESC.IsChanged Or
+      PSOPRDEFN.EMAILID.IsChanged Or
+      PSOPRDEFN.ACCTLOCK.IsChanged Then
+   
+   REM GET;
+   
+   &msgReq = CreateMessage(Operation.R16_USER_EXT_GET, %IntBroker_Request);
+   &docReq = &msgReq.GetURIDocument();
+   &root = &docReq.DocumentElement;
+   &root.GetPropertyByName("oprId").Value = PSOPRDEFN.OPRID.Value;
+   &msgReq.URIResourceIndex = 1;
+   
+   try
+      &msgRsp = %IntBroker.SyncRequest(&msgReq);
+   catch Exception &ex
+      If Find("404", &ex.ToString()) <> 0 Then
+         MessageBox(%MsgStyle_OK, "", 0, 0, "User does not exists in remote system");
+      Else
+         &ex.Output();
+      End-If;
+      Return;
+   end-try;
+   
+   REM PUT;
+   
+   &msgReq = CreateMessage(Operation.R16_USER_EXT_PUT, %IntBroker_Request);
+   &docUri = &msgReq.GetURIDocument();
+   &root = &docUri.DocumentElement;
+   &root.GetPropertyByName("oprId").Value = PSOPRDEFN.OPRID.Value;
+   &msgReq.URIResourceIndex = 1;
+   
+   &docReq = &msgReq.GetDocument();
+   &root = &docReq.DocumentElement;
+   &root.GetPropertyByName("name").Value = PSOPRDEFN.OPRDEFNDESC.Value;
+   &root.GetPropertyByName("email").Value = PSOPRDEFN.EMAILID.Value;
+   &root.GetPropertyByName("accountLocked").Value = (PSOPRDEFN.ACCTLOCK.Value = 1);
+   try
+      &msgRsp = %IntBroker.SyncRequest(&msgReq);
+   catch Exception &ex1
+      &ex1.Output();
+      Return;
+   end-try;
+End-If;

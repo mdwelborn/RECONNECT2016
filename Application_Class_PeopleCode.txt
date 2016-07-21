@@ -1,0 +1,162 @@
+import PS_PT:Integration:IRequestHandler;
+
+class R16_USER_SERVICE implements PS_PT:Integration:IRequestHandler
+   method R16_USER_SERVICE();
+   method OnRequest(&msgReq As Message) Returns Message;
+   method OnError(&msgReq As Message) Returns string;
+private
+   method GetUser(&msgReq As Message) Returns Message;
+   method GenerateGetRsp(&recOprDefn As Record) Returns Message;
+   method CreateUser(&msgReq As Message) Returns Message;
+   method GeneratePostRsp(&recOprDefn As Record) Returns Message;
+end-class;
+
+method R16_USER_SERVICE
+end-method;
+
+method OnRequest
+   /+ &msgReq as Message +/
+   /+ Returns Message +/
+   /+ Extends/implements PS_PT:Integration:IRequestHandler.OnRequest +/
+   Local Message &msgRsp;
+   
+   Evaluate &msgReq.HTTPMethod
+   When %IntBroker_HTTP_GET
+      &msgRsp = %This.GetUser(&msgReq);
+      Break;
+   When %IntBroker_HTTP_POST
+      &msgRsp = %This.CreateUser(&msgReq);
+      Break;
+   End-Evaluate;
+   
+   Return &msgRsp;
+end-method;
+
+method OnError
+   /+ &msgReq as Message +/
+   /+ Returns String +/
+   /+ Extends/implements PS_PT:Integration:IRequestHandler.OnError +/
+   Local Message &msgRsp;
+   Local Document &docRsp;
+   Local Compound &root;
+   
+   Evaluate &msgReq.HTTPMethod
+   When %IntBroker_HTTP_GET
+      &msgRsp = CreateMessage(Operation.R16_USER_GET, %IntBroker_Fault);
+      Break;
+   When %IntBroker_HTTP_POST
+      &msgRsp = CreateMessage(Operation.R16_USER_POST, %IntBroker_Fault);
+      Break;
+   End-Evaluate;
+   
+   &docRsp = &msgRsp.GetDocument();
+   &root = &docRsp.DocumentElement;
+   &root.GetPropertyByName("error").Value = &msgReq.IBException.ToString( False);
+   
+   Return &docRsp.GenJsonString();
+end-method;
+
+method GetUser
+   /+ &msgReq as Message +/
+   /+ Returns Message +/
+   Local Document &docUri;
+   Local Compound &root;
+   Local Record &recOprDefn;
+   
+   &docUri = &msgReq.GetURIDocument();
+   &root = &docUri.DocumentElement;
+   &recOprDefn = CreateRecord(Record.PSOPRDEFN);
+   &recOprDefn.OPRID.Value = &root.GetPropertyByName("oprId").Value;
+   
+   If Not (&recOprDefn.SelectByKey()) Then
+      throw CreateException(0, 0, "User not found");
+   End-If;
+   
+   Return %This.GenerateGetRsp(&recOprDefn);
+end-method;
+
+method GenerateGetRsp
+   /+ &recOprDefn as Record +/
+   /+ Returns Message +/
+   Local Message &msgRsp;
+   Local Document &docRsp;
+   Local Compound &root;
+   
+   &msgRsp = CreateMessage(Operation.R16_USER_GET, %IntBroker_Response);
+   &docRsp = &msgRsp.GetDocument();
+   &root = &docRsp.DocumentElement;
+   &root.GetPropertyByName("name").Value = &recOprDefn.OPRDEFNDESC.Value;
+   &root.GetPropertyByName("email").Value = &recOprDefn.EMAILID.Value;
+   &root.GetPropertyByName("accountLocked").Value = (&recOprDefn.ACCTLOCK.Value = 1);
+   
+   Return &msgRsp;
+end-method;
+
+method CreateUser
+   /+ &msgReq as Message +/
+   /+ Returns Message +/
+   Local Document &docReq;
+   Local Compound &root;
+   Local Record &recUserEmail, &recOprDefn, &recOprAlias;
+   
+   &docReq = &msgReq.GetDocument();
+   &root = &docReq.DocumentElement;
+   
+   &recOprDefn = CreateRecord(Record.PSOPRDEFN);
+   &recOprDefn.SetDefault();
+   &recOprDefn.OPRID.Value = &root.GetPropertyByName("oprId").Value;
+   &recOprDefn.OPRDEFNDESC.Value = &root.GetPropertyByName("name").Value;
+   &recOprDefn.EMAILID.Value = &root.GetPropertyByName("email").Value;
+   If &root.GetPropertyByName("accountLocked").Value Then
+      &recOprDefn.ACCTLOCK.Value = 1;
+   Else
+      &recOprDefn.ACCTLOCK.Value = 0;
+   End-If;
+   &recOprDefn.LASTPSWDCHANGE.Value = %Date;
+   &recOprDefn.SYMBOLICID.Value = "SYSADM1";
+   
+   If Not (&recOprDefn.Insert()) Then
+      throw CreateException(0, 0, "Could not insert new user");
+   End-If;
+   
+   &recUserEmail = CreateRecord(Record.PSUSEREMAIL);
+   &recUserEmail.OPRID.Value = &recOprDefn.OPRID.Value;
+   &recUserEmail.EMAILTYPE.Value = "WORK";
+   &recUserEmail.EMAILID.Value = &recOprDefn.EMAILID.Value;
+   &recUserEmail.PRIMARY_EMAIL.Value = "Y";
+   
+   If Not (&recUserEmail.Insert()) Then
+      throw CreateException(0, 0, "Could not insert email into PSUSEREMAIL");
+   End-If;
+   
+   &recOprAlias = CreateRecord(Record.PSOPRALIAS);
+   &recOprAlias.SetDefault();
+   &recOprAlias.OPRID.Value = &recOprDefn.OPRID.Value;
+   &recOprAlias.OPRALIASTYPE.Value = "NON";
+   
+   If Not (&recOprAlias.Insert()) Then
+      throw CreateException(0, 0, "Could not insert into PSOPRALIAS");
+   End-If;
+   
+   Return %This.GeneratePostRsp(&recOprDefn);
+end-method;
+
+method GeneratePostRsp
+   /+ &recOprDefn as Record +/
+   /+ Returns Message +/
+   Local Message &msgRsp;
+   Local Document &docRsp;
+   Local Compound &root;
+   
+   &msgRsp = CreateMessage(Operation.R16_USER_POST, %IntBroker_Response);
+   &docRsp = &msgRsp.GetDocument();
+   &root = &docRsp.DocumentElement;
+   &root.GetPropertyByName("oprId").Value = &recOprDefn.OPRID.Value;
+   &root.GetPropertyByName("name").Value = &recOprDefn.OPRDEFNDESC.Value;
+   &root.GetPropertyByName("email").Value = &recOprDefn.EMAILID.Value;
+   &root.GetPropertyByName("accountLocked").Value = (&recOprDefn.ACCTLOCK.Value = 1);
+   &root.GetPropertyByName("languageCode").Value = &recOprDefn.LANGUAGE_CD.Value;
+   
+   Return &msgRsp;
+end-method;
+
